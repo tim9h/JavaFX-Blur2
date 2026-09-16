@@ -25,7 +25,7 @@
 		<repository>
 			<id>github</id>
 			<name>GitHub Packages</name>
-			<url>https://maven.pkg.github.com/tim9h/JavaFXBlur2</url>
+			<url>https://maven.pkg.github.com/tim9h/JavaFX-Blur2</url>
 		</repository>
 	</distributionManagement>
 
