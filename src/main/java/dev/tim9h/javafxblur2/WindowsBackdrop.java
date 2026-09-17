@@ -86,6 +86,19 @@ public final class WindowsBackdrop {
 	/** Mica requires Windows 11. */
 	private static final int MICA_MIN_BUILD = 22000;
 
+	private static final int DWMWCP_DONOTROUND = 1;
+
+	private static final int SWP_NOSIZE = 0x0001;
+	private static final int SWP_NOMOVE = 0x0002;
+	private static final int SWP_NOZORDER = 0x0004;
+	private static final int SWP_NOACTIVATE = 0x0010;
+	private static final int SWP_FRAMECHANGED = 0x0020;
+
+	private static final int RDW_INVALIDATE = 0x0001;
+	private static final int RDW_ERASE = 0x0004;
+	private static final int RDW_FRAME = 0x0400;
+	private static final int RDW_ALLCHILDREN = 0x0080;
+
 	private WindowsBackdrop() {
 	}
 
@@ -167,6 +180,18 @@ public final class WindowsBackdrop {
 		}
 	}
 
+	public static boolean clearRoundedCorners(Stage stage) {
+		if (stage == null || !isWindows()) {
+			return false;
+		}
+
+		try {
+			return Native.instance().clearRoundedCorners(stage);
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
 	private static boolean isWindows() {
 		return System.getProperty("os.name", "").toLowerCase().contains("win");
 	}
@@ -210,6 +235,7 @@ public final class WindowsBackdrop {
 		private final MethodHandle dwmSetWindowAttribute;
 		private final MethodHandle dwmExtendFrameIntoClientArea;
 		private final MethodHandle rtlGetVersion;
+		private final MethodHandle setWindowPos;
 
 		static synchronized Native instance() {
 			if (instance == null) {
@@ -261,6 +287,8 @@ public final class WindowsBackdrop {
 					FunctionDescriptor.of(INT, ADDRESS, ADDRESS));
 			rtlGetVersion = linker.downcallHandle(ntdll.find("RtlGetVersion").orElseThrow(),
 					FunctionDescriptor.of(INT, ADDRESS));
+			setWindowPos = linker.downcallHandle(user32.find("SetWindowPos").orElseThrow(),
+					FunctionDescriptor.of(INT, ADDRESS, ADDRESS, INT, INT, INT, INT, INT));
 		}
 
 		boolean apply(Stage stage, Effect effect, int tintArgb) throws Throwable {
@@ -297,7 +325,9 @@ public final class WindowsBackdrop {
 			}
 			int width = rect.get(INT, 8) - rect.get(INT, 0);
 			int height = rect.get(INT, 12) - rect.get(INT, 4);
-			int diameter = 2 * Math.round((float) (radiusPx * stage.getOutputScaleX()));
+
+			int radius = Math.round(radiusPx * (float) stage.getOutputScaleX());
+			int diameter = Math.min(2 * radius, Math.min(width, height));
 
 			MemorySegment rgn = (MemorySegment) createRoundRectRgn.invoke(0, 0, width + 1, height + 1, diameter,
 					diameter);
@@ -307,6 +337,32 @@ public final class WindowsBackdrop {
 			// The system owns the region after this call; do not delete it.
 			int ok = (int) setWindowRgn.invoke(hwnd, rgn, 1);
 			return ok != 0;
+		}
+
+		boolean clearRoundedCorners(Stage stage) throws Throwable {
+			MemorySegment hwnd = resolveHwnd(stage);
+
+			if (hwnd == null || hwnd.address() == 0) {
+				return false;
+			}
+
+			// Remove the explicit HRGN assigned by SetWindowRgn().
+			int regionResult = (int) setWindowRgn.invoke(hwnd, MemorySegment.NULL, 1);
+
+			// Reset the DWM corner preference.
+			MemorySegment preference = arena.allocate(4);
+			preference.set(INT, 0, DWMWCP_DONOTROUND);
+
+			int cornerResult = (int) dwmSetWindowAttribute.invoke(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, preference, 4);
+
+			// Force Windows to recalculate and repaint the frame.
+			setWindowPos.invoke(hwnd, MemorySegment.NULL, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+			redrawWindow.invoke(hwnd, MemorySegment.NULL, MemorySegment.NULL,
+					RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+
+			return regionResult != 0 || cornerResult == 0;
 		}
 
 		private void setImmersiveDarkMode(MemorySegment hwnd, boolean dark) throws Throwable {
