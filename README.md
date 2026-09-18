@@ -4,6 +4,8 @@ Native Windows backdrop effects for JavaFX using the Java 26 Foreign Function & 
 
 This project adds Windows-specific glass and material blur effects to a JavaFX stage without requiring a custom DLL, JNI bridge, or native library loading.
 
+https://github.com/user-attachments/assets/5ac57554-b9f2-4e53-958a-3c54dc35443a
+
 ## Features
 
 - Native acrylic blur for Windows 10/11
